@@ -35,7 +35,7 @@ jobs:
           api-error-catalog scan examples/specs --format html --output site/index.html --quiet
           api-error-catalog scan examples/specs --format markdown --output site/catalog.md --quiet
           api-error-catalog scan examples/specs --format json --output site/catalog.json --quiet
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
         with:
           # Create the Pages site (source: GitHub Actions) on first run.
           enablement: true
