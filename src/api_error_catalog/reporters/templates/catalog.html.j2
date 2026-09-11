@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API Error Catalog</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1f2933; --muted: #5f6b7a; --line: #e1e5ea;
+    --accent: #2f6fed; --conflict: #c62828; --conflict-bg: #fdecea;
+    --warning: #9a6700; --warning-bg: #fff8e1; --info: #1565c0; --info-bg: #e3f2fd;
+    --ok: #2e7d32; --ok-bg: #e8f5e9; --code-bg: #eef1f5; --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1419; --panel: #171d25; --text: #e6e9ee; --muted: #9aa5b4; --line: #2a333f;
+      --accent: #6d9cff; --conflict: #ff6b6b; --conflict-bg: #3a1d1d;
+      --warning: #ffc861; --warning-bg: #3a2f14; --info: #7fb5ff; --info-bg: #17283d;
+      --ok: #7ad38a; --ok-bg: #16301c; --code-bg: #232b36;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  a { color: var(--accent); }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.92em; }
+  code { background: var(--code-bg); padding: 1px 6px; border-radius: 5px; }
+  header { padding: 28px 24px 8px; max-width: 1200px; margin: 0 auto; }
+  header h1 { margin: 0 0 4px; font-size: 26px; }
+  header p { margin: 0; color: var(--muted); }
+  main { max-width: 1200px; margin: 0 auto; padding: 8px 24px 56px; }
+  section { margin-top: 32px; }
+  h2 { font-size: 20px; margin: 0 0 14px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; }
+  .card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .card .value { font-size: 28px; font-weight: 650; margin-top: 2px; }
+  .card.conflict .value { color: var(--conflict); }
+  .card.warning .value { color: var(--warning); }
+  .card.ok .value { color: var(--ok); }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background: var(--code-bg); font-weight: 600; font-size: 13px; }
+  tr:last-child td { border-bottom: 0; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; align-items: center; }
+  .toolbar input, .toolbar select {
+    background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 10px; font-size: 14px;
+  }
+  .toolbar input { flex: 1 1 260px; }
+  .toolbar .count { color: var(--muted); font-size: 13px; margin-left: auto; }
+  .entry { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 12px; }
+  .entry h3 { margin: 0 0 8px; font-size: 17px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .entry dl { display: grid; grid-template-columns: 130px 1fr; gap: 4px 12px; margin: 0; }
+  .entry dt { color: var(--muted); }
+  .entry dd { margin: 0; }
+  .entry ul { margin: 0; padding-left: 18px; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; border: 1px solid transparent; }
+  .badge.status { background: var(--code-bg); color: var(--text); }
+  .badge.conflict { background: var(--conflict-bg); color: var(--conflict); }
+  .badge.warning { background: var(--warning-bg); color: var(--warning); }
+  .badge.info { background: var(--info-bg); color: var(--info); }
+  .badge.ok { background: var(--ok-bg); color: var(--ok); }
+  .issue { border-left: 4px solid var(--line); }
+  .issue.CONFLICT { border-left-color: var(--conflict); }
+  .issue.WARNING { border-left-color: var(--warning); }
+  .issue.INFO { border-left-color: var(--info); }
+  .issue .rule { color: var(--muted); font-size: 13px; }
+  .issue p { margin: 8px 0; }
+  .issue table { margin-top: 8px; font-size: 14px; }
+  .empty { color: var(--muted); padding: 16px; text-align: center; }
+  footer { color: var(--muted); font-size: 13px; text-align: center; padding: 24px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>API Error Catalog</h1>
+  <p>Unified error-code catalog generated from {{ summary.specifications }} OpenAPI specification{{ 's' if summary.specifications != 1 }} · {{ generated_at }}</p>
+</header>
+<main>
+  <section id="summary">
+    <h2>Summary</h2>
+    <div class="cards">
+      <div class="card"><div class="label">Specifications</div><div class="value">{{ summary.specifications }}</div></div>
+      <div class="card"><div class="label">Services</div><div class="value">{{ summary.services }}</div></div>
+      <div class="card"><div class="label">Operations scanned</div><div class="value">{{ summary.operations_scanned }}</div></div>
+      <div class="card"><div class="label">Unique error codes</div><div class="value">{{ summary.error_codes }}</div></div>
+      <div class="card {{ 'conflict' if summary.conflicts else 'ok' }}"><div class="label">Conflicts</div><div class="value">{{ summary.conflicts }}</div></div>
+      <div class="card {{ 'warning' if summary.warnings else 'ok' }}"><div class="label">Warnings</div><div class="value">{{ summary.warnings }}</div></div>
+    </div>
+  </section>
+
+  <section id="specifications">
+    <h2>Specifications</h2>
+    <table>
+      <thead><tr><th>Service</th><th>File</th><th>Version</th><th>OpenAPI</th><th>Operations</th></tr></thead>
+      <tbody>
+      {% for spec in result.specs %}
+        <tr><td>{{ spec.service }}</td><td><code>{{ spec.source_file }}</code></td><td>{{ spec.version or '—' }}</td><td>{{ spec.openapi_version or '—' }}</td><td>{{ spec.operations }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section id="catalog">
+    <h2>Error Catalog</h2>
+    <div class="toolbar">
+      <input id="search" type="search" placeholder="Search error code, endpoint, description…" aria-label="Search">
+      <select id="service-filter" aria-label="Filter by service">
+        <option value="">All services</option>
+        {% for service in result.services %}<option value="{{ service }}">{{ service }}</option>{% endfor %}
+      </select>
+      <select id="status-filter" aria-label="Filter by HTTP status">
+        <option value="">All HTTP statuses</option>
+        {% set statuses = [] %}
+        {% for entry in result.catalog %}{% for st in entry.http_statuses %}{% if st not in statuses %}{% set _ = statuses.append(st) %}{% endif %}{% endfor %}{% endfor %}
+        {% for st in statuses | sort %}<option value="{{ st }}">{{ st }}</option>{% endfor %}
+      </select>
+      <span class="count" id="count"></span>
+    </div>
+    <div id="entries">
+    {% for entry in result.catalog %}
+      {% set entry_conflicts = result.conflicts | selectattr('error_code', 'equalto', entry.error_code) | list %}
+      {% set entry_warnings = result.warnings | selectattr('error_code', 'equalto', entry.error_code) | list %}
+      <article class="entry" id="code-{{ entry.error_code }}"
+               data-code="{{ entry.error_code }}"
+               data-services="{{ entry.services | join('|') }}"
+               data-statuses="{{ entry.http_statuses | join('|') }}"
+               data-search="{{ entry.error_code }} {{ entry.services | join(' ') }} {{ entry.descriptions | join(' ') }} {% for o in entry.occurrences %}{{ o.endpoint }} {{ o.operation_id or '' }} {% endfor %}">
+        <h3>
+          <code>{{ entry.error_code }}</code>
+          {% for st in entry.http_statuses %}<span class="badge status">{{ st }}</span>{% endfor %}
+          {% if entry_conflicts %}<span class="badge conflict">{{ entry_conflicts | length }} conflict{{ 's' if entry_conflicts | length != 1 }}</span>{% endif %}
+          {% if entry_warnings %}<span class="badge warning">{{ entry_warnings | length }} warning{{ 's' if entry_warnings | length != 1 }}</span>{% endif %}
+        </h3>
+        <dl>
+          <dt>HTTP status</dt><dd>{{ entry.http_statuses | join(', ') }}</dd>
+          <dt>Services</dt><dd>{{ entry.services | join(', ') }}</dd>
+          <dt>Used by</dt>
+          <dd><ul>
+            {% for o in entry.occurrences %}
+            <li><code class="mono">{{ o.endpoint }}</code> → {{ o.http_status }} <span class="rule">({{ o.service }}{% if o.operation_id %}, <code>{{ o.operation_id }}</code>{% endif %})</span></li>
+            {% endfor %}
+          </ul></dd>
+          <dt>Description</dt><dd>{{ entry.descriptions | join(' / ') or '—' }}</dd>
+          <dt>Source</dt><dd>{{ entry.occurrences | map(attribute='source_file') | unique | join(', ') }}</dd>
+          {% set refs = entry.occurrences | map(attribute='schema_ref') | select | unique | list %}
+          {% if refs %}<dt>Schema</dt><dd>{% for r in refs %}<code>{{ r }}</code>{{ ' ' }}{% endfor %}</dd>{% endif %}
+        </dl>
+      </article>
+    {% endfor %}
+    </div>
+    <div id="no-results" class="empty hidden">No error codes match the current filter.</div>
+    {% if not result.catalog %}<div class="empty">No error codes were extracted.</div>{% endif %}
+  </section>
+
+  <section id="issues">
+    <h2>Conflicts &amp; Warnings</h2>
+    {% if not result.issues %}
+      <div class="entry"><span class="badge ok">OK</span> No conflicts or warnings found.</div>
+    {% endif %}
+    {% for issue in result.issues %}
+      <article class="entry issue {{ issue.severity }}">
+        <h3>
+          <span class="badge {{ issue.severity | lower }}">{{ issue.severity }}</span>
+          {% if issue.error_code %}<a href="#code-{{ issue.error_code }}"><code>{{ issue.error_code }}</code></a>{% endif %}
+          <span class="rule">{{ issue.rule_id }} · {{ issue.rule_name }}</span>
+        </h3>
+        <p>{{ issue.message }}</p>
+        {% if issue.occurrences %}
+        <table>
+          <thead><tr><th>Service</th><th>Endpoint</th><th>Status</th><th>Schema</th><th>Source</th></tr></thead>
+          <tbody>
+          {% for o in issue.occurrences %}
+            <tr>
+              <td>{{ o.service }}</td>
+              <td><code class="mono">{{ o.endpoint }}</code></td>
+              <td>{{ o.http_status }}</td>
+              <td><span class="mono">{{ o.signature | describe_signature }}</span></td>
+              <td><code>{{ o.source_file }}</code></td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+      </article>
+    {% endfor %}
+  </section>
+</main>
+<footer>Generated by api-error-catalog v{{ version }}</footer>
+<script id="catalog-data" type="application/json">{{ catalog_json | safe }}</script>
+<script>
+(function () {
+  var search = document.getElementById('search');
+  var serviceFilter = document.getElementById('service-filter');
+  var statusFilter = document.getElementById('status-filter');
+  var count = document.getElementById('count');
+  var noResults = document.getElementById('no-results');
+  var entries = Array.prototype.slice.call(document.querySelectorAll('#entries .entry'));
+
+  function apply() {
+    var q = (search.value || '').trim().toLowerCase();
+    var service = serviceFilter.value;
+    var status = statusFilter.value;
+    var visible = 0;
+    entries.forEach(function (el) {
+      var ok = true;
+      if (q && el.getAttribute('data-search').toLowerCase().indexOf(q) === -1) ok = false;
+      if (ok && service && el.getAttribute('data-services').split('|').indexOf(service) === -1) ok = false;
+      if (ok && status && el.getAttribute('data-statuses').split('|').indexOf(status) === -1) ok = false;
+      el.classList.toggle('hidden', !ok);
+      if (ok) visible++;
+    });
+    count.textContent = visible + ' of ' + entries.length + ' error codes';
+    noResults.classList.toggle('hidden', visible !== 0 || entries.length === 0);
+  }
+
+  search.addEventListener('input', apply);
+  serviceFilter.addEventListener('change', apply);
+  statusFilter.addEventListener('change', apply);
+  apply();
+})();
+</script>
+</body>
+</html>
