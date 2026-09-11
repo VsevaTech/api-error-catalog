@@ -15,7 +15,7 @@ jobs:
     name: Action on clean specs (must pass)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Run api-error-catalog action
         id: catalog
@@ -34,7 +34,7 @@ jobs:
     name: Action on example specs (conflicts expected)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Run api-error-catalog action expecting failure
         id: catalog
@@ -57,7 +57,7 @@ jobs:
     name: Action without failing the job
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Run api-error-catalog action in report-only mode
         id: catalog
