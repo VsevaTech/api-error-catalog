@@ -1,0 +1,72 @@
+name: Action self-test
+
+# Exercises the composite GitHub Action from this repository against the bundled examples.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  clean-specs:
+    name: Action on clean specs (must pass)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run api-error-catalog action
+        id: catalog
+        uses: ./
+        with:
+          path: tests/fixtures/clean
+          fail-on-conflict: true
+
+      - name: Assert outputs
+        run: |
+          echo "conflicts=${{ steps.catalog.outputs.conflicts }} warnings=${{ steps.catalog.outputs.warnings }}"
+          test "${{ steps.catalog.outputs.conflicts }}" = "0"
+          test "${{ steps.catalog.outputs.exit-code }}" = "0"
+
+  example-specs:
+    name: Action on example specs (conflicts expected)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run api-error-catalog action expecting failure
+        id: catalog
+        uses: ./
+        continue-on-error: true
+        with:
+          path: examples/specs
+          fail-on-conflict: true
+          output: reports/error-catalog.md
+
+      - name: Assert the action failed because of conflicts
+        run: |
+          echo "outcome=${{ steps.catalog.outcome }} exit=${{ steps.catalog.outputs.exit-code }}"
+          test "${{ steps.catalog.outcome }}" = "failure"
+          test "${{ steps.catalog.outputs.exit-code }}" = "1"
+          test "${{ steps.catalog.outputs.conflicts }}" = "2"
+          test -s reports/error-catalog.md
+
+  report-only:
+    name: Action without failing the job
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run api-error-catalog action in report-only mode
+        id: catalog
+        uses: ./
+        with:
+          path: examples/specs
+          fail-on-conflict: false
+
+      - name: Assert outputs
+        run: |
+          test "${{ steps.catalog.outputs.exit-code }}" = "0"
+          test "${{ steps.catalog.outputs.conflicts }}" = "2"

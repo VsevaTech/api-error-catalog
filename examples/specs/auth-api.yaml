@@ -1,0 +1,194 @@
+openapi: 3.0.3
+info:
+  title: Auth API
+  version: 1.4.0
+  description: >
+    Synthetic example service for api-error-catalog. Handles phone/OTP sign-in and
+    session tokens for a fictional marketplace.
+servers:
+  - url: https://api.example.test
+paths:
+  /v1/auth/otp/request:
+    post:
+      operationId: requestOtp
+      summary: Send a one-time password to a phone number
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpRequest'
+      responses:
+        '202':
+          description: OTP sent
+        '400':
+          description: Phone number is malformed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error_code: invalid_phone_number
+                message: Phone number must be in E.164 format
+        '429':
+          description: Too many OTP requests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error_code: rate_limit
+                message: Too many requests, retry later
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /v1/auth/otp/verify:
+    post:
+      operationId: verifyOtp
+      summary: Verify a one-time password and issue tokens
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpVerifyRequest'
+      responses:
+        '200':
+          description: Tokens issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPair'
+        '400':
+          description: OTP is invalid
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - type: object
+                    properties:
+                      error_code:
+                        type: string
+                        enum:
+                          - invalid_otp
+                          - otp_expired
+        '429':
+          description: Too many OTP requests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error_code: rate_limit
+                message: Too many requests, retry later
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /v1/auth/token/refresh:
+    post:
+      operationId: refreshToken
+      summary: Exchange a refresh token for a new token pair
+      responses:
+        '200':
+          description: Tokens issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPair'
+        '401':
+          description: Refresh token is invalid or expired
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /v1/users/{id}:
+    get:
+      operationId: getUser
+      summary: Get a user profile
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                notFound:
+                  summary: Unknown user id
+                  value:
+                    error_code: user_not_found
+                    message: User not found
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  responses:
+    InternalError:
+      description: Unexpected server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error_code: internal_error
+            message: Unexpected error
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error_code, message]
+      properties:
+        error_code:
+          type: string
+          description: Machine-readable error identifier
+        message:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+    OtpRequest:
+      type: object
+      required: [phone]
+      properties:
+        phone:
+          type: string
+    OtpVerifyRequest:
+      type: object
+      required: [phone, otp]
+      properties:
+        phone:
+          type: string
+        otp:
+          type: string
+    TokenPair:
+      type: object
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        display_name:
+          type: string

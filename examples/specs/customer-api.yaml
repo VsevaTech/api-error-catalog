@@ -1,0 +1,180 @@
+openapi: 3.0.3
+info:
+  title: Customer API
+  version: 2.1.0
+  description: Synthetic example service — customer profiles and company membership.
+paths:
+  /v1/customers/{id}:
+    get:
+      operationId: getCustomer
+      parameters:
+        - $ref: '#/components/parameters/CustomerId'
+      responses:
+        '200':
+          description: Customer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Customer'
+        '403':
+          description: Caller does not belong to the customer's company
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error_code: company_access_denied
+                message: You do not have access to this company
+        '404':
+          description: Customer does not exist
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error_code: customer_not_found
+                message: Customer does not exist
+    delete:
+      operationId: deleteCustomer
+      parameters:
+        - $ref: '#/components/parameters/CustomerId'
+      responses:
+        '204':
+          description: Deleted
+        '403':
+          description: Caller does not belong to the customer's company
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error_code: company_access_denied
+                message: You do not have access to this company
+        '409':
+          description: Customer is blocked and cannot be deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error_code: customer_blocked
+                message: Customer is blocked
+
+  /v1/customers/{id}/subscriptions:
+    get:
+      operationId: listCustomerSubscriptions
+      parameters:
+        - $ref: '#/components/parameters/CustomerId'
+      responses:
+        '200':
+          description: Subscriptions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Subscription'
+        '400':
+          description: Unknown user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error_code: user_not_found
+                message: Unknown user id
+        '403':
+          description: Caller does not belong to the customer's company
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error_code: company_access_denied
+                message: You do not have access to this company
+
+  /v1/customers/{id}/block:
+    post:
+      operationId: blockCustomer
+      parameters:
+        - $ref: '#/components/parameters/CustomerId'
+      responses:
+        '204':
+          description: Blocked
+        '409':
+          description: Customer is already blocked
+          content:
+            application/json:
+              # Inline copy of ErrorResponse — same structure, duplicated definition.
+              schema:
+                type: object
+                required: [error_code, message]
+                properties:
+                  error_code:
+                    type: string
+                    enum: [customer_blocked]
+                  message:
+                    type: string
+                  details:
+                    type: object
+        '422':
+          description: Request validation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+
+components:
+  parameters:
+    CustomerId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error_code, message]
+      properties:
+        error_code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+    ValidationError:
+      type: object
+      required: [error_code, message, errors]
+      properties:
+        error_code:
+          type: string
+          const: validation_failed
+        message:
+          type: string
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              reason:
+                type: string
+    Customer:
+      type: object
+      properties:
+        id:
+          type: string
+        company_id:
+          type: string
+        email:
+          type: string
+          example: customer@example.test
+    Subscription:
+      type: object
+      properties:
+        id:
+          type: string
+        plan:
+          type: string

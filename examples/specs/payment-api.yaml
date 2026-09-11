@@ -1,0 +1,159 @@
+openapi: 3.1.0
+info:
+  title: Payment API
+  version: 0.9.0
+  description: >
+    Synthetic example service — card payments and refunds. Uses the `code` field
+    name and OpenAPI 3.1 `const` for error identifiers.
+paths:
+  /v1/payments:
+    post:
+      operationId: createPayment
+      responses:
+        '201':
+          description: Payment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        '400':
+          description: Request parameters are invalid
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [code, message]
+                properties:
+                  code:
+                    type: string
+                    enum: [invalid_parameter, unsupported_currency]
+                  message:
+                    type: string
+                  field:
+                    type: string
+        '402':
+          description: Payment was declined by the issuer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentDeclinedError'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RateLimitError'
+
+  /v1/payments/{id}:
+    get:
+      operationId: getPayment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Payment
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payment'
+        '404':
+          description: Payment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: payment_not_found
+                message: Payment not found
+        '503':
+          description: Downstream processor unavailable
+          content:
+            application/json:
+              schema:
+                $ref: 'common/errors.yaml#/components/schemas/ServiceUnavailable'
+
+  /v1/payments/{id}/refund:
+    post:
+      operationId: refundPayment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '201':
+          description: Refund created
+        '404':
+          description: Payment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: payment_not_found
+                message: Payment not found
+        '409':
+          description: Payment cannot be refunded in its current state
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ErrorResponse'
+                  - properties:
+                      code:
+                        const: refund_not_allowed
+        '503':
+          description: Downstream processor unavailable
+
+components:
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+    PaymentDeclinedError:
+      type: object
+      required: [code, message, decline_reason]
+      properties:
+        code:
+          const: payment_declined
+        message:
+          type: string
+        decline_reason:
+          type: string
+          enum: [insufficient_funds, do_not_honor, expired_card]
+    RateLimitError:
+      type: object
+      required: [code, message, retry_after]
+      properties:
+        code:
+          type: string
+          enum: [rate_limit]
+        message:
+          type: string
+        retry_after:
+          type: integer
+          description: Seconds until the client may retry
+    Payment:
+      type: object
+      properties:
+        id:
+          type: string
+        amount:
+          type: integer
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [pending, captured, declined, refunded]

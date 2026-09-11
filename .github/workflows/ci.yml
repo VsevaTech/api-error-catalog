@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Lint, test and run examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Test
+        run: pytest --cov --cov-report=term-missing
+
+      - name: Run CLI on examples (conflicts expected)
+        run: |
+          api-error-catalog scan examples/specs
+          api-error-catalog scan examples/specs --format markdown --output out/catalog.md --quiet
+          api-error-catalog scan examples/specs --format html --output out/catalog.html --quiet
+          api-error-catalog scan examples/specs --format json --output out/catalog.json --quiet
+          ls -la out
+
+      - name: Verify exit codes
+        run: |
+          set +e
+          api-error-catalog scan tests/fixtures/clean --fail-on-conflict > /dev/null; c0=$?
+          api-error-catalog scan examples/specs --fail-on-conflict > /dev/null; c1=$?
+          api-error-catalog scan tests/fixtures/invalid > /dev/null 2>&1; c2=$?
+          set -e
+          echo "clean=$c0 conflict=$c1 invalid=$c2"
+          test "$c0" -eq 0 && test "$c1" -eq 1 && test "$c2" -eq 2
+
+      - name: Render example reports and demo page
+        run: |
+          python scripts/build_examples.py
+          python scripts/build_examples.py --check
+          cp examples/expected/* out/
+
+      - name: Publish example report to job summary
+        run: cat out/catalog.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: example-reports
+          path: out/
