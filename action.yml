@@ -1,0 +1,96 @@
+name: API Error Catalog
+description: >-
+  Generate an API error catalog from OpenAPI specifications and detect inconsistent
+  error contracts across microservices. Publishes a Markdown report to the job summary.
+author: api-error-catalog contributors
+
+branding:
+  icon: alert-octagon
+  color: red
+
+inputs:
+  path:
+    description: Directory (or single file) containing OpenAPI specifications.
+    required: false
+    default: specs
+  fail-on-conflict:
+    description: Fail the job when at least one CONFLICT is found.
+    required: false
+    default: "true"
+  config:
+    description: Optional path to an .api-error-catalog.yaml configuration file.
+    required: false
+    default: ""
+  output:
+    description: Path of the Markdown report to write.
+    required: false
+    default: api-error-catalog.md
+  python-version:
+    description: Python version used to run the tool.
+    required: false
+    default: "3.12"
+
+outputs:
+  report:
+    description: Path to the generated Markdown report.
+    value: ${{ steps.scan.outputs.report }}
+  conflicts:
+    description: Number of conflicts found.
+    value: ${{ steps.scan.outputs.conflicts }}
+  warnings:
+    description: Number of warnings found.
+    value: ${{ steps.scan.outputs.warnings }}
+  exit-code:
+    description: Exit code of the scan (0 = ok, 1 = conflicts, 2 = error).
+    value: ${{ steps.scan.outputs.exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install api-error-catalog
+      shell: bash
+      run: python -m pip install --quiet "${{ github.action_path }}"
+
+    - name: Scan OpenAPI specifications
+      id: scan
+      shell: bash
+      env:
+        SCAN_PATH: ${{ inputs.path }}
+        SCAN_CONFIG: ${{ inputs.config }}
+        SCAN_OUTPUT: ${{ inputs.output }}
+        FAIL_ON_CONFLICT: ${{ inputs.fail-on-conflict }}
+      run: |
+        set +e
+        args=(scan "$SCAN_PATH" --format markdown --output "$SCAN_OUTPUT")
+        if [ -n "$SCAN_CONFIG" ]; then args+=(--config "$SCAN_CONFIG"); fi
+        if [ "$FAIL_ON_CONFLICT" = "true" ]; then args+=(--fail-on-conflict); fi
+
+        api-error-catalog "${args[@]}"
+        code=$?
+        set -e
+
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        echo "report=$SCAN_OUTPUT" >> "$GITHUB_OUTPUT"
+
+        if [ -f "$SCAN_OUTPUT" ]; then
+          cat "$SCAN_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+          conflicts=$(grep -E '^\| Conflicts \|' "$SCAN_OUTPUT" | sed -E 's/[^0-9]//g')
+          warnings=$(grep -E '^\| Warnings \|' "$SCAN_OUTPUT" | sed -E 's/[^0-9]//g')
+          echo "conflicts=${conflicts:-0}" >> "$GITHUB_OUTPUT"
+          echo "warnings=${warnings:-0}" >> "$GITHUB_OUTPUT"
+        else
+          echo "conflicts=0" >> "$GITHUB_OUTPUT"
+          echo "warnings=0" >> "$GITHUB_OUTPUT"
+        fi
+
+        if [ "$code" -eq 1 ]; then
+          echo "::error::api-error-catalog found conflicting error contracts (see job summary)"
+        elif [ "$code" -ne 0 ]; then
+          echo "::error::api-error-catalog failed with exit code $code"
+        fi
+        exit "$code"

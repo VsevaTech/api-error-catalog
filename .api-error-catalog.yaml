@@ -1,0 +1,17 @@
+# Example configuration for api-error-catalog (all keys optional).
+# Copy this file next to your specs or pass it explicitly with --config.
+
+# Field names that carry the machine-readable error identifier, in priority order.
+error_code_fields:
+  - error_code
+  - errorCode
+  - code
+
+# Glob patterns used to discover specification files (recursive).
+include_patterns:
+  - "*.yaml"
+  - "*.yml"
+  - "*.json"
+
+# Error codes to leave out of the catalog and all rules.
+ignore_error_codes: []
