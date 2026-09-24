@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from .config import Config
 from .extractor import extract
+from .governance import Baseline, annotate, apply_governance
 from .loader import LoadedSpec, load_specs
 from .models import (
     CatalogEntry,
@@ -17,12 +19,14 @@ from .models import (
     Severity,
     SpecInfo,
 )
-from .rules import group_by_code, run_all
-
-REF_RULE_ID = "REF001"
-REF_RULE_NAME = "UNRESOLVED_REFERENCE"
-SKIP_RULE_ID = "SPEC001"
-SKIP_RULE_NAME = "NOT_AN_OPENAPI_DOCUMENT"
+from .rules import (
+    REF_RULE_ID,
+    REF_RULE_NAME,
+    SKIP_RULE_ID,
+    SKIP_RULE_NAME,
+    group_by_code,
+    run_all,
+)
 
 
 def build_catalog(occurrences: list[ErrorOccurrence]) -> list[CatalogEntry]:
@@ -39,8 +43,15 @@ def build_catalog(occurrences: list[ErrorOccurrence]) -> list[CatalogEntry]:
 
 
 def analyze_specs(
-    specs: list[LoadedSpec], config: Config, skipped: Iterable[Path] = ()
+    specs: list[LoadedSpec],
+    config: Config,
+    skipped: Iterable[Path] = (),
+    *,
+    baseline: Baseline | None = None,
+    today: date | None = None,
 ) -> ScanResult:
+    """Analyze loaded specs. Governance (baseline + `config.exceptions`) is applied when
+    either is present; `today` defaults to the current UTC date."""
     infos: list[SpecInfo] = []
     occurrences: list[ErrorOccurrence] = []
     load_warnings: list[LoadWarning] = []
@@ -74,6 +85,18 @@ def analyze_specs(
             )
 
     issues.extend(run_all(occurrences))
+    governance = None
+    if baseline is not None or config.exceptions:
+        governance, extra = apply_governance(
+            issues,
+            exceptions=config.exceptions,
+            baseline=baseline,
+            today=today or datetime.now(UTC).date(),
+            expiry_warning_days=config.exception_expiry_warning_days,
+        )
+        issues.extend(extra)
+    else:
+        annotate(issues)
     issues.sort(
         key=lambda i: (_severity_rank(i.severity), i.rule_id, i.error_code or "", i.message)
     )
@@ -84,13 +107,20 @@ def analyze_specs(
         catalog=build_catalog(occurrences),
         issues=issues,
         load_warnings=load_warnings,
+        governance=governance,
     )
 
 
-def scan(path: Path, config: Config) -> ScanResult:
+def scan(
+    path: Path,
+    config: Config,
+    *,
+    baseline: Baseline | None = None,
+    today: date | None = None,
+) -> ScanResult:
     """Load every OpenAPI document under `path` and analyze it. Raises `SpecLoadError`."""
     specs, skipped = load_specs(path, config.include_patterns)
-    return analyze_specs(specs, config, skipped)
+    return analyze_specs(specs, config, skipped, baseline=baseline, today=today)
 
 
 def _severity_rank(severity: Severity) -> int:
