@@ -70,3 +70,49 @@ jobs:
         run: |
           test "${{ steps.catalog.outputs.exit-code }}" = "0"
           test "${{ steps.catalog.outputs.conflicts }}" = "2"
+
+  governance:
+    name: Action with baseline and exceptions (legacy debt accepted)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run api-error-catalog action with governance config
+        id: catalog
+        uses: ./
+        with:
+          path: examples/specs
+          config: examples/governance/.api-error-catalog.yaml
+          fail-on-conflict: true
+          # Pinned so the self-test does not start failing when the example exceptions expire.
+          today: "2026-09-24"
+
+      - name: Assert only new debt would fail
+        run: |
+          echo "conflicts=${{ steps.catalog.outputs.conflicts }} enforced=${{ steps.catalog.outputs.enforced-conflicts }} baselined=${{ steps.catalog.outputs.baselined }} excepted=${{ steps.catalog.outputs.excepted }}"
+          test "${{ steps.catalog.outputs.exit-code }}" = "0"
+          test "${{ steps.catalog.outputs.conflicts }}" = "2"
+          test "${{ steps.catalog.outputs.enforced-conflicts }}" = "0"
+          test "${{ steps.catalog.outputs.excepted }}" = "2"
+
+  governance-expired:
+    name: Action with an expired exception (must fail)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run api-error-catalog action after the exceptions expired
+        id: catalog
+        uses: ./
+        continue-on-error: true
+        with:
+          path: examples/specs
+          config: examples/governance/.api-error-catalog.yaml
+          fail-on-conflict: true
+          today: "2027-07-01"
+
+      - name: Assert expired exceptions fail the job
+        run: |
+          test "${{ steps.catalog.outcome }}" = "failure"
+          test "${{ steps.catalog.outputs.exit-code }}" = "1"
+          test "${{ steps.catalog.outputs.expired }}" = "2"

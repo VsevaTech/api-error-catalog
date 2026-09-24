@@ -21,6 +21,18 @@ inputs:
     description: Optional path to an .api-error-catalog.yaml configuration file.
     required: false
     default: ""
+  baseline:
+    description: >-
+      Optional baseline file with known debt (overrides `baseline:` in the config). With a
+      baseline, the job fails only on new conflicts and on expired exceptions.
+    required: false
+    default: ""
+  today:
+    description: >-
+      Optional YYYY-MM-DD date to evaluate exception expiry against (default: today, UTC).
+      Useful to preview what will fail after a release freeze.
+    required: false
+    default: ""
   output:
     description: Path of the Markdown report to write.
     required: false
@@ -40,6 +52,20 @@ outputs:
   warnings:
     description: Number of warnings found.
     value: ${{ steps.scan.outputs.warnings }}
+  enforced-conflicts:
+    description: >-
+      Conflicts that fail the job — new, or covered only by an expired exception.
+      Equals `conflicts` when no baseline or exceptions are configured.
+    value: ${{ steps.scan.outputs.enforced-conflicts }}
+  baselined:
+    description: Findings accepted by the baseline.
+    value: ${{ steps.scan.outputs.baselined }}
+  excepted:
+    description: Findings covered by an active exception.
+    value: ${{ steps.scan.outputs.excepted }}
+  expired:
+    description: Findings whose exception has expired.
+    value: ${{ steps.scan.outputs.expired }}
   exit-code:
     description: Exit code of the scan (0 = ok, 1 = conflicts, 2 = error).
     value: ${{ steps.scan.outputs.exit-code }}
@@ -62,12 +88,16 @@ runs:
       env:
         SCAN_PATH: ${{ inputs.path }}
         SCAN_CONFIG: ${{ inputs.config }}
+        SCAN_BASELINE: ${{ inputs.baseline }}
+        SCAN_TODAY: ${{ inputs.today }}
         SCAN_OUTPUT: ${{ inputs.output }}
         FAIL_ON_CONFLICT: ${{ inputs.fail-on-conflict }}
       run: |
         set +e
         args=(scan "$SCAN_PATH" --format markdown --output "$SCAN_OUTPUT")
         if [ -n "$SCAN_CONFIG" ]; then args+=(--config "$SCAN_CONFIG"); fi
+        if [ -n "$SCAN_BASELINE" ]; then args+=(--baseline "$SCAN_BASELINE"); fi
+        if [ -n "$SCAN_TODAY" ]; then args+=(--today "$SCAN_TODAY"); fi
         if [ "$FAIL_ON_CONFLICT" = "true" ]; then args+=(--fail-on-conflict); fi
 
         api-error-catalog "${args[@]}"
@@ -77,19 +107,25 @@ runs:
         echo "exit-code=$code" >> "$GITHUB_OUTPUT"
         echo "report=$SCAN_OUTPUT" >> "$GITHUB_OUTPUT"
 
+        metric() {
+          grep -E "^\| $1 \|" "$SCAN_OUTPUT" 2>/dev/null | head -n1 | sed -E 's/[^0-9]//g'
+        }
         if [ -f "$SCAN_OUTPUT" ]; then
           cat "$SCAN_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
-          conflicts=$(grep -E '^\| Conflicts \|' "$SCAN_OUTPUT" | sed -E 's/[^0-9]//g')
-          warnings=$(grep -E '^\| Warnings \|' "$SCAN_OUTPUT" | sed -E 's/[^0-9]//g')
-          echo "conflicts=${conflicts:-0}" >> "$GITHUB_OUTPUT"
-          echo "warnings=${warnings:-0}" >> "$GITHUB_OUTPUT"
-        else
-          echo "conflicts=0" >> "$GITHUB_OUTPUT"
-          echo "warnings=0" >> "$GITHUB_OUTPUT"
         fi
+        conflicts=$(metric "Conflicts")
+        enforced=$(metric "Enforced conflicts")
+        {
+          echo "conflicts=${conflicts:-0}"
+          echo "warnings=$(metric "Warnings" || true)"
+          echo "enforced-conflicts=${enforced:-${conflicts:-0}}"
+          echo "baselined=$(metric "Baselined" || true)"
+          echo "excepted=$(metric "Excepted" || true)"
+          echo "expired=$(metric "Expired exceptions" || true)"
+        } | sed -E 's/=$/=0/' >> "$GITHUB_OUTPUT"
 
         if [ "$code" -eq 1 ]; then
-          echo "::error::api-error-catalog found conflicting error contracts (see job summary)"
+          echo "::error::api-error-catalog found new conflicting error contracts or expired exceptions (see job summary)"
         elif [ "$code" -ne 0 ]; then
           echo "::error::api-error-catalog failed with exit code $code"
         fi

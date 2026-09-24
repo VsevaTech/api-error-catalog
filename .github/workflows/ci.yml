@@ -50,6 +50,24 @@ jobs:
           echo "clean=$c0 conflict=$c1 invalid=$c2"
           test "$c0" -eq 0 && test "$c1" -eq 1 && test "$c2" -eq 2
 
+      - name: Verify governance (baseline + exceptions)
+        run: |
+          cfg=examples/governance/.api-error-catalog.yaml
+          # The committed baseline must not list debt that has already been fixed.
+          api-error-catalog baseline update examples/specs -c "$cfg" --check
+          set +e
+          # Legacy debt is accepted: green.
+          api-error-catalog scan examples/specs -c "$cfg" --fail-on-conflict --today 2026-09-24 > /dev/null; g0=$?
+          # After an exception expires the finding is enforced again: red.
+          api-error-catalog scan examples/specs -c "$cfg" --fail-on-conflict --today 2027-07-01 > /dev/null; g1=$?
+          # A new conflict on top of the baseline: red.
+          cp -r examples/specs /tmp/specs
+          sed 's/Auth API/Billing API/; s/"404"/"422"/; s/'"'"'404'"'"'/'"'"'422'"'"'/' examples/specs/auth-api.yaml > /tmp/specs/billing-api.yaml
+          api-error-catalog scan /tmp/specs -c "$cfg" --fail-on-conflict --today 2026-09-24 > /dev/null; g2=$?
+          set -e
+          echo "accepted=$g0 expired=$g1 new-debt=$g2"
+          test "$g0" -eq 0 && test "$g1" -eq 1 && test "$g2" -eq 1
+
       - name: Render example reports and demo page
         run: |
           python scripts/build_examples.py
