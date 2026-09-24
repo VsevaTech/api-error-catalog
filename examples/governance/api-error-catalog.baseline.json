@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "generator": {
+    "name": "api-error-catalog",
+    "version": "0.1.0"
+  },
+  "entries": [
+    {
+      "fingerprint": "ERROR001:user_not_found",
+      "rule_id": "ERROR001",
+      "rule_name": "SAME_CODE_DIFFERENT_HTTP_STATUS",
+      "severity": "CONFLICT",
+      "error_code": "user_not_found",
+      "facets": [
+        "Auth API -> 404",
+        "Customer API -> 400"
+      ]
+    },
+    {
+      "fingerprint": "ERROR003:customer_blocked",
+      "rule_id": "ERROR003",
+      "rule_name": "DESCRIPTION_MISMATCH",
+      "severity": "WARNING",
+      "error_code": "customer_blocked",
+      "facets": [
+        "Customer API -> \"customer is already blocked\"",
+        "Customer API -> \"customer is blocked and cannot be deleted\""
+      ]
+    },
+    {
+      "fingerprint": "ERROR003:rate_limit",
+      "rule_id": "ERROR003",
+      "rule_name": "DESCRIPTION_MISMATCH",
+      "severity": "WARNING",
+      "error_code": "rate_limit",
+      "facets": [
+        "Auth API -> \"too many otp requests\"",
+        "Payment API -> \"rate limit exceeded\""
+      ]
+    },
+    {
+      "fingerprint": "ERROR003:user_not_found",
+      "rule_id": "ERROR003",
+      "rule_name": "DESCRIPTION_MISMATCH",
+      "severity": "WARNING",
+      "error_code": "user_not_found",
+      "facets": [
+        "Auth API -> \"user not found\"",
+        "Customer API -> \"unknown user\""
+      ]
+    },
+    {
+      "fingerprint": "ERROR004:Payment API:GET /v1/payments/{id} 503",
+      "rule_id": "ERROR004",
+      "rule_name": "UNDOCUMENTED_ERROR_CODE",
+      "severity": "WARNING",
+      "error_code": null,
+      "facets": []
+    },
+    {
+      "fingerprint": "ERROR004:Payment API:POST /v1/payments/{id}/refund 503",
+      "rule_id": "ERROR004",
+      "rule_name": "UNDOCUMENTED_ERROR_CODE",
+      "severity": "WARNING",
+      "error_code": null,
+      "facets": []
+    },
+    {
+      "fingerprint": "ERROR005:customer_blocked@Customer API",
+      "rule_id": "ERROR005",
+      "rule_name": "DUPLICATE_OR_INCONSISTENT_DEFINITION",
+      "severity": "WARNING",
+      "error_code": "customer_blocked",
+      "facets": [
+        "#/components/schemas/ErrorResponse -> {details: object, error_code*: string, message*: string}",
+        "inline@POST /v1/customers/{id}/block 409 -> {details: object, error_code*: string, message*: string}"
+      ]
+    },
+    {
+      "fingerprint": "REF001:payment-api.yaml: remote $ref not resolved: common/errors.yaml#/components/schemas/ServiceUnavailable",
+      "rule_id": "REF001",
+      "rule_name": "UNRESOLVED_REFERENCE",
+      "severity": "WARNING",
+      "error_code": null,
+      "facets": []
+    }
+  ]
+}

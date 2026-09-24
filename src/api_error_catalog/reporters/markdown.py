@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
-from ..models import Issue, ScanResult
+from ..models import ExceptionState, Issue, IssueStatus, ScanResult
+from .text import status_note
 
 SEVERITY_ICON = {"CONFLICT": "❌", "WARNING": "⚠️", "INFO": "ℹ️"}
+EXCEPTION_ICON = {
+    ExceptionState.ACTIVE: "🟢",
+    ExceptionState.EXPIRING: "🟡",
+    ExceptionState.EXPIRED: "🔴",
+    ExceptionState.UNUSED: "⚪",
+}
 
 
 def _code(text: str | None) -> str:
@@ -15,12 +22,20 @@ def _escape(text: str | None) -> str:
     return (text or "").replace("|", "\\|").replace("\n", " ")
 
 
-def _issue_block(issue: Issue) -> list[str]:
+def _issue_block(issue: Issue, governance: bool = False) -> list[str]:
     icon = SEVERITY_ICON.get(str(issue.severity), "")
     title = f"{icon} **{issue.severity}** · {issue.rule_id} `{issue.rule_name}`"
     if issue.error_code:
         title += f" · {_code(issue.error_code)}"
-    lines = [f"#### {title}", "", issue.message, ""]
+    lines = [f"#### {title}", ""]
+    note = status_note(issue) if governance else None
+    if note:
+        lines += [f"> **Status:** {_escape(note)}", ""]
+    lines += [issue.message, ""]
+    if issue.new_facets:
+        lines += ["New since baseline:", ""]
+        lines += [f"- `{facet}`" for facet in issue.new_facets]
+        lines.append("")
     if issue.occurrences:
         lines += ["| Service | Endpoint | Status | Source |", "|---|---|---|---|"]
         for occ in issue.occurrences:
@@ -47,6 +62,16 @@ def render_markdown(result: ScanResult) -> str:
         f"| Unique error codes | {s['error_codes']} |",
         f"| Conflicts | {s['conflicts']} |",
         f"| Warnings | {s['warnings']} |",
+    ]
+    if result.governance is not None:
+        lines += [
+            f"| Enforced conflicts | {s['enforced_conflicts']} |",
+            f"| Enforced warnings | {s['enforced_warnings']} |",
+            f"| Baselined | {s['baselined']} |",
+            f"| Excepted | {s['excepted']} |",
+            f"| Expired exceptions | {s['expired']} |",
+        ]
+    lines += [
         "",
         "## Specifications",
         "",
@@ -74,20 +99,88 @@ def render_markdown(result: ScanResult) -> str:
             f"{', '.join(_escape(x) for x in entry.services)} | {used_by} | {descriptions} |"
         )
 
+    if result.governance is not None:
+        lines += _governance_section(result)
+
+    governed = result.governance is not None
+    shown = result.enforced if governed else result.issues
     lines += ["", "## Conflicts & Warnings", ""]
     if not result.issues:
         lines.append("✅ No conflicts or warnings found.")
+    elif not shown:
+        lines.append("✅ No new conflicts or warnings — every finding is accepted debt.")
     else:
-        if result.conflicts:
-            lines += [f"### Conflicts ({len(result.conflicts)})", ""]
-            for issue in result.conflicts:
-                lines += _issue_block(issue)
-        if result.warnings:
-            lines += [f"### Warnings ({len(result.warnings)})", ""]
-            for issue in result.warnings:
-                lines += _issue_block(issue)
-        if result.infos:
-            lines += [f"### Info ({len(result.infos)})", ""]
-            for issue in result.infos:
-                lines += _issue_block(issue)
+        for title, severity in (
+            ("Conflicts", "CONFLICT"),
+            ("Warnings", "WARNING"),
+            ("Info", "INFO"),
+        ):
+            group = [i for i in shown if i.severity == severity]
+            if group:
+                lines += [f"### {title} ({len(group)})", ""]
+                for issue in group:
+                    lines += _issue_block(issue, governed)
+    if governed and result.accepted:
+        lines += [
+            "",
+            "<details>",
+            f"<summary>Accepted debt ({len(result.accepted)}) — baselined or excepted, "
+            "not enforced</summary>",
+            "",
+            "| Status | Severity | Finding | Owner | Expires | Reason |",
+            "|---|---|---|---|---|---|",
+        ]
+        for issue in result.accepted:
+            exc = issue.exception
+            lines.append(
+                f"| {issue.status} | {issue.severity} | `{_escape(issue.fingerprint)}` | "
+                f"{_escape(exc.owner) if exc else '-'} | "
+                f"{exc.expires_at.isoformat() if exc else '-'} | "
+                f"{_escape(exc.reason) if exc else '-'} |"
+            )
+        lines += ["", "</details>"]
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _governance_section(result: ScanResult) -> list[str]:
+    gov = result.governance
+    assert gov is not None
+    lines = ["", "## Governance", "", f"Evaluated as of **{gov.today.isoformat()}**.", ""]
+    if gov.baseline_path:
+        lines.append(f"- Baseline: `{gov.baseline_path}` — {gov.baseline_entries} entries.")
+    else:
+        lines.append("- Baseline: none.")
+    if gov.resolved_baseline_entries:
+        lines.append(
+            f"- 🎉 {len(gov.resolved_baseline_entries)} baseline item(s) fixed — run "
+            "`api-error-catalog baseline update` to lock in the progress."
+        )
+    expired = sum(1 for i in result.issues if i.status == IssueStatus.EXPIRED)
+    if expired:
+        lines.append(f"- 🔴 {expired} finding(s) are enforced again: their exception expired.")
+    if not gov.exceptions:
+        lines.append("- Exceptions: none.")
+        return lines
+    lines += [
+        "",
+        f"### Exceptions ({len(gov.exceptions)})",
+        "",
+        "| State | Rule | Error code | Scope | Owner | Expires | Reason | Ticket |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for st in gov.exceptions:
+        exc = st.exception
+        scope = "; ".join(
+            part
+            for part in (
+                f"service: {exc.service}" if exc.service else "",
+                f"endpoint: `{exc.endpoint}`" if exc.endpoint else "",
+            )
+            if part
+        )
+        lines.append(
+            f"| {EXCEPTION_ICON[st.state]} {st.state} | {exc.rule} | {_code(exc.error_code)} | "
+            f"{_escape(scope) or '-'} | {_escape(exc.owner)} | {exc.expires_at.isoformat()} | "
+            f"{_escape(exc.reason)} | {_escape(exc.ticket) or '-'} |"
+        )
+    return lines

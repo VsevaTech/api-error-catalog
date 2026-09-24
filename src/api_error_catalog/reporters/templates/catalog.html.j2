@@ -68,6 +68,18 @@
   .issue.WARNING { border-left-color: var(--warning); }
   .issue.INFO { border-left-color: var(--info); }
   .issue .rule { color: var(--muted); font-size: 13px; }
+  .issue.accepted { opacity: .62; }
+  .issue .status-note { color: var(--muted); font-size: 14px; margin: 4px 0; }
+  .badge.gov-new { background: var(--conflict-bg); color: var(--conflict); }
+  .badge.gov-expired { background: var(--conflict); color: var(--panel); }
+  .badge.gov-baselined, .badge.gov-excepted { background: var(--code-bg); color: var(--muted); border-color: var(--line); }
+  .badge.state-active { background: var(--ok-bg); color: var(--ok); }
+  .badge.state-expiring { background: var(--warning-bg); color: var(--warning); }
+  .badge.state-expired { background: var(--conflict-bg); color: var(--conflict); }
+  .badge.state-unused { background: var(--code-bg); color: var(--muted); }
+  .gov-meta { color: var(--muted); margin: 0 0 12px; }
+  label.toggle { color: var(--muted); font-size: 14px; display: inline-flex; gap: 8px; align-items: center; cursor: pointer; }
+  .toolbar label.toggle input { flex: 0 0 auto; width: auto; padding: 0; margin: 0; }
   .issue p { margin: 8px 0; }
   .issue table { margin-top: 8px; font-size: 14px; }
   .empty { color: var(--muted); padding: 16px; text-align: center; }
@@ -90,8 +102,47 @@
       <div class="card"><div class="label">Unique error codes</div><div class="value">{{ summary.error_codes }}</div></div>
       <div class="card {{ 'conflict' if summary.conflicts else 'ok' }}"><div class="label">Conflicts</div><div class="value">{{ summary.conflicts }}</div></div>
       <div class="card {{ 'warning' if summary.warnings else 'ok' }}"><div class="label">Warnings</div><div class="value">{{ summary.warnings }}</div></div>
+      {% if result.governance %}
+      <div class="card {{ 'conflict' if summary.enforced_conflicts else 'ok' }}"><div class="label">Enforced conflicts</div><div class="value">{{ summary.enforced_conflicts }}</div></div>
+      <div class="card"><div class="label">Baselined</div><div class="value">{{ summary.baselined }}</div></div>
+      <div class="card"><div class="label">Excepted</div><div class="value">{{ summary.excepted }}</div></div>
+      <div class="card {{ 'conflict' if summary.expired else 'ok' }}"><div class="label">Expired</div><div class="value">{{ summary.expired }}</div></div>
+      {% endif %}
     </div>
   </section>
+
+  {% if result.governance %}
+  {% set gov = result.governance %}
+  <section id="governance">
+    <h2>Governance</h2>
+    <p class="gov-meta">Evaluated as of {{ gov.today.isoformat() }} ·
+      {% if gov.baseline_path %}baseline <code>{{ gov.baseline_path }}</code> ({{ gov.baseline_entries }} entries){% else %}no baseline{% endif %}
+      {% if gov.resolved_baseline_entries %} · {{ gov.resolved_baseline_entries | length }} baseline item(s) fixed — run <code>baseline update</code>{% endif %}
+    </p>
+    {% if gov.exceptions %}
+    <table>
+      <thead><tr><th>State</th><th>Rule</th><th>Error code</th><th>Scope</th><th>Owner</th><th>Expires</th><th>Reason</th><th>Ticket</th></tr></thead>
+      <tbody>
+      {% for st in gov.exceptions %}
+        {% set exc = st.exception %}
+        <tr>
+          <td><span class="badge state-{{ st.state }}">{{ st.state }}</span></td>
+          <td>{{ exc.rule }}</td>
+          <td>{% if exc.error_code %}<code>{{ exc.error_code }}</code>{% else %}—{% endif %}</td>
+          <td>{% if exc.service %}{{ exc.service }} {% endif %}{% if exc.endpoint %}<code>{{ exc.endpoint }}</code>{% endif %}{% if not exc.service and not exc.endpoint %}—{% endif %}</td>
+          <td>{{ exc.owner }}</td>
+          <td>{{ exc.expires_at.isoformat() }}</td>
+          <td>{{ exc.reason }}</td>
+          <td>{{ exc.ticket or '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="entry">No exceptions configured.</div>
+    {% endif %}
+  </section>
+  {% endif %}
 
   <section id="specifications">
     <h2>Specifications</h2>
@@ -159,17 +210,30 @@
 
   <section id="issues">
     <h2>Conflicts &amp; Warnings</h2>
+    {% if result.governance and result.accepted %}
+    <div class="toolbar"><label class="toggle"><input type="checkbox" id="show-accepted"> Show accepted debt ({{ result.accepted | length }} baselined / excepted)</label></div>
+    {% endif %}
+    {% if result.governance and result.issues and not result.enforced %}
+      <div class="entry"><span class="badge ok">OK</span> No new conflicts or warnings — every finding is accepted debt.</div>
+    {% endif %}
     {% if not result.issues %}
       <div class="entry"><span class="badge ok">OK</span> No conflicts or warnings found.</div>
     {% endif %}
     {% for issue in result.issues %}
-      <article class="entry issue {{ issue.severity }}">
+      <article class="entry issue {{ issue.severity }}{% if result.governance and not issue.is_enforced %} accepted hidden{% endif %}">
         <h3>
           <span class="badge {{ issue.severity | lower }}">{{ issue.severity }}</span>
+          {% if result.governance %}<span class="badge gov-{{ issue.status }}">{{ issue.status }}</span>{% endif %}
           {% if issue.error_code %}<a href="#code-{{ issue.error_code }}"><code>{{ issue.error_code }}</code></a>{% endif %}
           <span class="rule">{{ issue.rule_id }} · {{ issue.rule_name }}</span>
         </h3>
+        {% if result.governance and issue.exception %}
+        <p class="status-note">Exception <code>exceptions[{{ issue.exception.index }}]</code> · owner {{ issue.exception.owner }} · expires {{ issue.exception.expires_at.isoformat() }} · {{ issue.exception.reason }}</p>
+        {% endif %}
         <p>{{ issue.message }}</p>
+        {% if issue.new_facets %}
+        <p class="status-note">New since baseline: {% for f in issue.new_facets %}<code>{{ f }}</code>{{ ' ' }}{% endfor %}</p>
+        {% endif %}
         {% if issue.occurrences %}
         <table>
           <thead><tr><th>Service</th><th>Endpoint</th><th>Status</th><th>Schema</th><th>Source</th></tr></thead>
@@ -216,6 +280,15 @@
     });
     count.textContent = visible + ' of ' + entries.length + ' error codes';
     noResults.classList.toggle('hidden', visible !== 0 || entries.length === 0);
+  }
+
+  var showAccepted = document.getElementById('show-accepted');
+  if (showAccepted) {
+    showAccepted.addEventListener('change', function () {
+      document.querySelectorAll('.issue.accepted').forEach(function (el) {
+        el.classList.toggle('hidden', !showAccepted.checked);
+      });
+    });
   }
 
   search.addEventListener('input', apply);

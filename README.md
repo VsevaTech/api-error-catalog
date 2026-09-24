@@ -28,6 +28,7 @@ In a microservice system, error responses are described in dozens of OpenAPI fil
 - Resolves local `$ref`s (schemas, responses, `allOf` extensions, `oneOf`/`anyOf` variants); remote references produce a warning instead of a crash.
 - Five consistency rules (see [Rules](#rules)) with `CONFLICT` / `WARNING` severities.
 - Reports as **text**, **Markdown** (for PRs and `$GITHUB_STEP_SUMMARY`), **HTML** (self-contained, client-side search and filters, no framework) and **JSON** (for tooling).
+- **API governance for existing codebases**: a reviewed **baseline** of known debt (CI fails only on *new* findings) and **owned, time-boxed exceptions** (`owner`, `reason`, `expires_at`) that turn back into errors when they expire. See [Adopting in an existing codebase](#adopting-in-an-existing-codebase-baseline--exceptions).
 - CI-friendly exit codes and a ready-to-use **composite GitHub Action**.
 - No heavy dependencies: Typer, PyYAML and Jinja2.
 
@@ -112,9 +113,15 @@ Options:
   -f, --format [text|markdown|html|json]   Report format (default: text).
   -o, --output PATH          Write the report to a file instead of stdout.
   -c, --config PATH          Path to .api-error-catalog.yaml.
-  --fail-on-conflict         Exit with code 1 when at least one CONFLICT is found.
+  -b, --baseline PATH        Baseline file with known debt (overrides `baseline:` in the config).
+  --fail-on-conflict         Exit with code 1 when at least one enforced CONFLICT is found
+                             (new, or covered only by an expired exception).
   -q, --quiet                Suppress the console summary when writing to a file.
+  --today YYYY-MM-DD         Evaluate exception expiry as of this date (default: today, UTC).
   -h, --help                 Show help.
+
+api-error-catalog baseline create PATH [-c CONFIG] [-o FILE] [--force]
+api-error-catalog baseline update PATH [-c CONFIG] [-b FILE] [--check]
 ```
 
 Examples:
@@ -153,10 +160,22 @@ Inputs:
 | `path`             | `specs`                 | Directory (or file) with OpenAPI specifications.         |
 | `fail-on-conflict` | `true`                  | Fail the job when at least one `CONFLICT` is found.      |
 | `config`           | `""`                    | Optional path to `.api-error-catalog.yaml`.              |
+| `baseline`         | `""`                    | Optional baseline file (overrides `baseline:` in config).|
+| `today`            | `""`                    | Optional `YYYY-MM-DD` to evaluate exception expiry against. |
 | `output`           | `api-error-catalog.md`  | Where to write the Markdown report.                      |
 | `python-version`   | `3.12`                  | Python version used to run the tool.                     |
 
-Outputs: `report` (path of the Markdown file), `conflicts`, `warnings`, `exit-code`.
+Outputs: `report` (path of the Markdown file), `conflicts`, `warnings`, `exit-code`, and for governance `enforced-conflicts` (what fails the job), `baselined`, `excepted`, `expired`.
+
+Adopting the action on a repository with legacy debt:
+
+```yaml
+      - uses: VsevaTech/api-error-catalog@v1
+        with:
+          path: specs
+          config: .api-error-catalog.yaml   # declares `baseline:` and `exceptions:`
+          fail-on-conflict: true            # fails only on new debt and expired exceptions
+```
 
 This repository runs the action on itself in [`action-self-test.yml`](.github/workflows/action-self-test.yml).
 
@@ -172,6 +191,131 @@ The HTML report is a single self-contained file with a search box and service / 
 
 The JSON report (`schema_version: 1`) contains the same data plus every raw occurrence, including `location` (`example`, `examples`, `schema.enum`, `schema.const`, `schema.default`, `schema.example`) and a normalized `signature` of the response schema.
 
+## Adopting in an existing codebase: baseline & exceptions
+
+Turning on `--fail-on-conflict` in a system that already has 200 inconsistent error contracts
+would block every pull request. The governance layer separates **known debt** from **new
+debt**, and turns every tolerated inconsistency into an explicit, owned, dated decision.
+
+### 1. Baseline — freeze the current debt
+
+```bash
+api-error-catalog baseline create specs/ --output api-error-catalog.baseline.json
+git add api-error-catalog.baseline.json   # the debt register goes through code review
+```
+
+```yaml
+# .api-error-catalog.yaml
+baseline: api-error-catalog.baseline.json   # relative to this file
+```
+
+From now on `scan --fail-on-conflict` fails only on findings that are **not** in the baseline.
+Every finding has a stable, human-readable *fingerprint* and a set of *facets*:
+
+| Rule | Fingerprint | Facets — how the debt can grow |
+|---|---|---|
+| `ERROR001` | `ERROR001:user_not_found` | `service -> status` pairs |
+| `ERROR002` | `ERROR002:rate_limit` | `service -> schema signature` pairs |
+| `ERROR003` | `ERROR003:customer_blocked` | `service -> normalized description` pairs |
+| `ERROR004` | `ERROR004:Auth API:POST /v1/auth/token/refresh 401` | — (one finding per response) |
+| `ERROR005` | `ERROR005:customer_blocked@Customer API` | `schema definition -> signature` pairs |
+| `REF001`   | `REF001:<file>: <message>` | — |
+
+A baselined finding stays accepted while its facets are a subset of the baseline entry. It is
+enforced again as soon as the debt **grows** — e.g. a third service starts returning
+`user_not_found` with `422` — and the report says exactly what is new:
+
+```text
+CONFLICT
+rule: ERROR001 SAME_CODE_DIFFERENT_HTTP_STATUS
+error_code: user_not_found
+status: new — the baselined debt grew
+  Auth API                 GET /v1/users/{id} 404
+  Billing API              GET /v1/invoices/{id} 422
+  Customer API             GET /v1/customers/{id}/subscriptions 400
+  + new since baseline: Billing API -> 422
+```
+
+Adding another endpoint that repeats an already-baselined facet (one more `404` in Auth API)
+is not new debt. The baseline is sorted JSON, so `git diff` on it reads as a debt changelog.
+
+**Ratchet.** When debt is fixed, the report shows `GOV004 BASELINE_DEBT_RESOLVED` (INFO).
+`baseline update` removes fixed entries and facets and **never adds** new findings:
+
+```bash
+api-error-catalog baseline update specs/          # prune fixed debt, commit the diff
+api-error-catalog baseline update specs/ --check  # CI: exit 1 if the baseline lists fixed debt
+```
+
+Accepting new debt is deliberate and visible in review: either an exception (below) or
+`baseline create --force`.
+
+### 2. Exceptions — owned, time-boxed decisions
+
+The baseline answers *"what did we inherit?"*. Exceptions answer *"what do we knowingly tolerate,
+who owns it, why, and until when?"*:
+
+```yaml
+# .api-error-catalog.yaml
+exceptions:
+  - rule: ERROR002                       # rule ID or name (SAME_CODE_INCOMPATIBLE_SCHEMA)
+    error_code: rate_limit
+    owner: "@payments-team"
+    reason: Payment API keeps {code, retry_after} until the v2 SDK ships.
+    ticket: PAY-1423                     # optional
+    expires_at: 2027-06-30               # inclusive
+
+  - rule: ERROR004
+    service: Auth API                    # every occurrence must be in this service…
+    endpoint: POST /v1/auth/token/*      # …and match this fnmatch pattern
+    owner: "@identity-team"
+    reason: Refresh errors are owned by the gateway spec.
+    expires_at: 2027-03-31
+```
+
+| Key | Required | Meaning |
+|---|---|---|
+| `rule` | yes | `ERROR001`…`ERROR005`, by ID or name. |
+| `owner` | yes | Team or person accountable for the debt. |
+| `reason` | yes | Why it is tolerated — shown in every report. |
+| `expires_at` | yes | `YYYY-MM-DD`, inclusive. |
+| `error_code` / `service` / `endpoint` | at least one | Narrow the match. Blanket, rule-wide exceptions are rejected. `service`/`endpoint` require *every* occurrence of the finding to match, so a cross-service conflict can only be excepted by error code, never by one of its participants. |
+| `ticket` | no | Link to the remediation task. |
+
+Lifecycle of an exception, evaluated as of today (UTC) or `--today`:
+
+| State | Effect | Finding |
+|---|---|---|
+| 🟢 active | The finding is `excepted` and does not fail CI. | — |
+| 🟡 expiring | Still active; expires within `exception_expiry_warning_days` (default 14). | `GOV003` INFO |
+| 🔴 expired | **The finding is enforced again**, even if it is also in the baseline, and the build fails with a finding that names the owner. | `GOV001` CONFLICT |
+| ⚪ unused | Matches nothing — the problem was fixed or the matcher is wrong. | `GOV002` WARNING |
+
+Findings covered by an exception are never written to the baseline, so deleting an expired
+exception cannot quietly turn the problem into "known debt". The way out of an expired
+exception is to fix the finding or renew it with a new `expires_at` — both are reviewable diffs.
+
+### Precedence
+
+1. An **active** exception matches → `excepted`.
+2. Otherwise an **expired** exception matches → `expired` (enforced) + `GOV001`.
+3. Otherwise the baseline has the fingerprint and all facets → `baselined`.
+4. Otherwise → `new` (enforced).
+
+Only CONFLICTs with status `new`/`expired` (including `GOV001`) fail `--fail-on-conflict`;
+warnings never fail the run. Reports list enforced findings in full and collapse accepted debt
+(Markdown `<details>`, HTML "Show accepted debt" toggle); the JSON report carries `fingerprint`,
+`status`, `exception` and `new_facets` per issue plus a `governance` block.
+
+A complete example lives in [`examples/governance/`](examples/governance):
+
+```bash
+api-error-catalog scan examples/specs -c examples/governance/.api-error-catalog.yaml --fail-on-conflict
+# → exit 0: 2 legacy conflicts accepted (1 baselined, 1 excepted)
+api-error-catalog scan examples/specs -c examples/governance/.api-error-catalog.yaml --fail-on-conflict --today 2027-07-01
+# → exit 1: both exceptions expired, GOV001 names @payments-team and @identity-team
+```
+
 ## Rules
 
 | ID         | Name                                  | Severity              | Fires when                                                                                                         |
@@ -183,6 +327,10 @@ The JSON report (`schema_version: 1`) contains the same data plus every raw occu
 | `ERROR005` | `DUPLICATE_OR_INCONSISTENT_DEFINITION`| WARNING / CONFLICT    | One service declares the same error code in several schema definitions — WARNING if they are identical (duplication), CONFLICT if they differ. |
 | `REF001`   | `UNRESOLVED_REFERENCE`                | WARNING               | A remote or unresolvable `$ref` was skipped.                                                                       |
 | `SPEC001`  | `NOT_AN_OPENAPI_DOCUMENT`             | INFO                  | A YAML/JSON file in the scanned directory is not an OpenAPI 3.x document and was skipped.                          |
+| `GOV001`   | `EXCEPTION_EXPIRED`                   | CONFLICT              | An exception matching a current finding is past its `expires_at`.                                                  |
+| `GOV002`   | `UNUSED_EXCEPTION`                    | WARNING               | An exception matches no current finding (fixed, or wrong matcher).                                                  |
+| `GOV003`   | `EXCEPTION_EXPIRING_SOON`             | INFO                  | An active exception expires within `exception_expiry_warning_days`.                                                |
+| `GOV004`   | `BASELINE_DEBT_RESOLVED`              | INFO                  | Baseline entries (or facets of them) no longer occur — run `baseline update`.                                      |
 
 Schema comparison (`ERROR002`, `ERROR005`) uses a deliberately shallow *schema signature*: the set of top-level property names, their JSON types, and which of them are required. `allOf` members are merged; `oneOf`/`anyOf` branches are treated as separate variants.
 
@@ -205,6 +353,11 @@ include_patterns:
 
 # Error codes to leave out of the catalog and all rules.
 ignore_error_codes: []
+
+# Governance (optional) — see "Adopting in an existing codebase".
+baseline: api-error-catalog.baseline.json
+exception_expiry_warning_days: 14
+exceptions: []
 ```
 
 Error codes are looked up at the top level of the error payload first; nested envelopes such as `{"error": {"code": "..."}}` are searched up to three levels deep.
@@ -213,9 +366,9 @@ Error codes are looked up at the top level of the error payload first; nested en
 
 | Code | Meaning                                                          |
 |------|------------------------------------------------------------------|
-| `0`  | Scan completed. Either no conflicts, or `--fail-on-conflict` not set. Warnings never fail the run. |
-| `1`  | `--fail-on-conflict` was set and at least one `CONFLICT` was found. |
-| `2`  | Parsing or configuration error (malformed YAML/JSON, missing path, invalid config). |
+| `0`  | Scan completed. Either no enforced conflicts, or `--fail-on-conflict` not set. Warnings never fail the run. |
+| `1`  | `--fail-on-conflict` was set and at least one enforced `CONFLICT` was found (new, expired exception, or `GOV001`). `baseline update --check`: the baseline lists fixed debt. |
+| `2`  | Parsing or configuration error (malformed YAML/JSON, missing path, invalid config, invalid exception, missing or malformed baseline). |
 
 ## Example Project
 
@@ -243,10 +396,11 @@ src/api_error_catalog/
 ├── models.py         dataclasses: ErrorOccurrence, Issue, CatalogEntry, ScanResult
 ├── analyzer.py       orchestration: load → extract → catalog → rules
 ├── rules/            one module per rule (ERROR001…ERROR005)
+├── governance/       fingerprints & facets, baseline file, exceptions → issue status (GOV001…GOV004)
 └── reporters/        text, markdown, json, html (Jinja2 template in templates/)
 ```
 
-The pipeline is `loader → resolver → extractor → rules → reporters`. Every stage works on plain dataclasses, so new rules and reporters are single functions.
+The pipeline is `loader → resolver → extractor → rules → governance → reporters`. Every stage works on plain dataclasses, so new rules and reporters are single functions.
 
 ## Development
 
@@ -266,8 +420,8 @@ python scripts/build_examples.py   # render examples/expected/* and docs/index.h
 ## Roadmap
 
 - Resolve remote and multi-file `$ref`s.
-- Suppress individual findings inline (`x-error-catalog-ignore`) and per rule in the configuration.
-- Baseline file to adopt the tool in an existing codebase without failing on legacy conflicts.
+- Suppress individual findings inline (`x-error-catalog-ignore`).
+- Governance policy knobs: maximum exception lifetime, required `ticket`, CODEOWNERS-validated `owner`.
 - Naming-convention rule (e.g. enforce `snake_case` error codes) and near-duplicate detection (`user_not_found` vs `userNotFound`).
 - SARIF output for GitHub code scanning; PR annotations pointing at the offending lines.
 - PyPI release and pre-commit hook.

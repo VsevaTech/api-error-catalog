@@ -1,0 +1,34 @@
+# Governance example for examples/specs.
+#
+#   api-error-catalog scan examples/specs \
+#     --config examples/governance/.api-error-catalog.yaml --fail-on-conflict
+#
+# The baseline records the legacy findings that existed when the tool was adopted; the
+# exceptions below are explicit, owned and time-boxed decisions. CI fails only on new debt
+# and on exceptions whose expires_at has passed.
+
+# Known debt, relative to this file. Create / refresh it with
+#   api-error-catalog baseline create examples/specs -c examples/governance/.api-error-catalog.yaml
+#   api-error-catalog baseline update examples/specs -c examples/governance/.api-error-catalog.yaml
+baseline: api-error-catalog.baseline.json
+
+# Report exceptions that expire within this many days (GOV003, INFO).
+exception_expiry_warning_days: 30
+
+exceptions:
+  - rule: ERROR002                       # rule ID or name (SAME_CODE_INCOMPATIBLE_SCHEMA)
+    error_code: rate_limit
+    owner: "@payments-team"
+    reason: >-
+      Payment API keeps {code, retry_after} until the v2 SDK ships; mobile clients
+      parse retry_after from the body.
+    ticket: PAY-1423
+    expires_at: 2027-06-30               # inclusive; after this date the finding fails CI again
+
+  - rule: ERROR004
+    service: Auth API                    # every occurrence must be in this service…
+    endpoint: POST /v1/auth/token/refresh  # …and match this endpoint (fnmatch globs allowed)
+    owner: "@identity-team"
+    reason: Refresh errors come from the gateway; the contract is being moved to the gateway spec.
+    ticket: IAM-311
+    expires_at: 2027-03-31

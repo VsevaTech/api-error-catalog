@@ -15,3 +15,24 @@ include_patterns:
 
 # Error codes to leave out of the catalog and all rules.
 ignore_error_codes: []
+
+# --- Governance (see README → "Adopting in an existing codebase") ----------------------
+
+# Baseline file with known debt, relative to this file. Findings recorded there do not fail
+# `--fail-on-conflict`; new ones do. Create it with `api-error-catalog baseline create`.
+# baseline: api-error-catalog.baseline.json
+
+# Report exceptions that expire within this many days (GOV003, INFO). Default: 14.
+# exception_expiry_warning_days: 14
+
+# Owned, time-boxed exceptions. An expired exception makes the finding fail the build again.
+# exceptions:
+#   - rule: ERROR001                 # rule ID or name; ERROR001–ERROR005
+#     error_code: user_not_found     # at least one of error_code / service / endpoint
+#     service: Customer API          # optional: every occurrence must be in this service
+#     endpoint: "GET /v1/legacy/*"   # optional: fnmatch pattern over "METHOD /path"
+#     owner: "@customer-team"        # required
+#     reason: Legacy mobile clients rely on 400   # required
+#     ticket: CUST-123               # optional
+#     expires_at: 2026-12-31         # required, inclusive
+exceptions: []

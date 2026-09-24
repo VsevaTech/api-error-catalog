@@ -13,16 +13,21 @@ from __future__ import annotations
 
 import re
 import sys
+from datetime import date
 from pathlib import Path
 
 from api_error_catalog.analyzer import scan
-from api_error_catalog.config import Config
+from api_error_catalog.config import Config, load_config
+from api_error_catalog.governance import load_baseline
 from api_error_catalog.reporters import render_html, render_json, render_markdown
 
 ROOT = Path(__file__).resolve().parent.parent
 SPECS = ROOT / "examples" / "specs"
 EXPECTED = ROOT / "examples" / "expected"
 DOCS_INDEX = ROOT / "docs" / "index.html"
+GOVERNANCE_CONFIG = ROOT / "examples" / "governance" / ".api-error-catalog.yaml"
+# Fixed evaluation date so the governed report is reproducible.
+GOVERNANCE_TODAY = date(2026, 9, 24)
 
 _TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC")
 
@@ -35,8 +40,13 @@ def _normalize(text: str) -> str:
 def main(argv: list[str]) -> int:
     check = "--check" in argv
     result = scan(SPECS, Config())
+    gov_cfg = load_config(GOVERNANCE_CONFIG, SPECS)
+    governed = scan(
+        SPECS, gov_cfg, baseline=load_baseline(gov_cfg.baseline), today=GOVERNANCE_TODAY
+    )
     outputs = {
         EXPECTED / "catalog.md": render_markdown(result),
+        EXPECTED / "catalog-governed.md": render_markdown(governed),
         EXPECTED / "catalog.json": render_json(result),
         EXPECTED / "catalog.html": render_html(result),
         DOCS_INDEX: render_html(result),

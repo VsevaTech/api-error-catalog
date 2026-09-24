@@ -29,6 +29,7 @@ def to_dict(result: ScanResult) -> dict[str, Any]:
         ],
         "catalog": [entry.to_dict() for entry in result.catalog],
         "issues": [issue.to_dict() for issue in result.issues],
+        "governance": result.governance.to_dict() if result.governance else None,
         "uncategorized": [o.to_dict() for o in result.occurrences if o.is_uncategorized],
     }
 

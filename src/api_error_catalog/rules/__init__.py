@@ -24,13 +24,22 @@ ALL_RULES: tuple[Rule, ...] = (
     inconsistent_definition.run,
 )
 
+# Findings produced while loading specs rather than by a consistency rule.
+REF_RULE_ID = "REF001"
+REF_RULE_NAME = "UNRESOLVED_REFERENCE"
+SKIP_RULE_ID = "SPEC001"
+SKIP_RULE_NAME = "NOT_AN_OPENAPI_DOCUMENT"
+
 RULE_CATALOG: dict[str, str] = {
     status_conflict.RULE_ID: status_conflict.RULE_NAME,
     schema_conflict.RULE_ID: schema_conflict.RULE_NAME,
     description_mismatch.RULE_ID: description_mismatch.RULE_NAME,
     undocumented_error.RULE_ID: undocumented_error.RULE_NAME,
     inconsistent_definition.RULE_ID: inconsistent_definition.RULE_NAME,
+    REF_RULE_ID: REF_RULE_NAME,
+    SKIP_RULE_ID: SKIP_RULE_NAME,
 }
+"""Every rule whose findings can be baselined or covered by an exception."""
 
 
 def run_all(occurrences: list[ErrorOccurrence], rules: Iterable[Rule] = ALL_RULES) -> list[Issue]:
@@ -40,4 +49,14 @@ def run_all(occurrences: list[ErrorOccurrence], rules: Iterable[Rule] = ALL_RULE
     return issues
 
 
-__all__ = ["ALL_RULES", "RULE_CATALOG", "Rule", "group_by_code", "run_all"]
+__all__ = [
+    "ALL_RULES",
+    "REF_RULE_ID",
+    "REF_RULE_NAME",
+    "RULE_CATALOG",
+    "SKIP_RULE_ID",
+    "SKIP_RULE_NAME",
+    "Rule",
+    "group_by_code",
+    "run_all",
+]
